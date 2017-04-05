@@ -55,15 +55,14 @@ typedef struct removed_list {
 } removed_list;
 
 typedef struct thread_specific_alarm {
-    alarm_t         alarm;
-    int             alarm_num;
+    alarm_t *       alarm;
     int             removed;
 } thread_alarm;
 
 typedef struct thread_alarm_list {
-    thread_alarm * next;
-    thread_alarm * previous;
-    thread_alarm * data;
+    struct thread_alarm_list *   next;
+    struct thread_alarm_list *   previous;
+    thread_alarm *               data;
 } display_thread_list;
 
 removed_list * removed = NULL;
@@ -89,11 +88,25 @@ display_thread_list * thread_list = NULL;
  */
 void find_in_list(int alarm_num){
     display_thread_list * list = thread_list;
+    display_thread_list * old;
     while(list != NULL){
-        if(list->data->alarm_num == alarm_num){
+        if(list->data->alarm->alarm_number == alarm_num){
             //Mark as removed;
             list->data->removed = 1;
+            //Remove from list, the thread will clean itself up
+            if(list->next != NULL)
+                list->next->previous;
+            if(list->previous != NULL)
+                list->previous->next = list->next;
+
+            if(thread_list == list){
+             *(&thread_list) = list->next;
+            }
+            old = list;
+            free(old);
+            return;
         }
+        list = list->next;
     }
 }
 
@@ -105,12 +118,8 @@ void find_in_list(int alarm_num){
  * Note: last_rem should be null
  *
  */
-void alarm_delete(removed_list ** last_rem){
+void alarm_delete(){
     alarm_t **last, *next, *to_remove;
-
-    printf("deleting...\n");
-    *last_rem = (removed_list *) malloc(sizeof(removed_list));
-    removed_list * list = *last_rem;
 
     /*Locking protocol:
      *
@@ -124,13 +133,9 @@ void alarm_delete(removed_list ** last_rem){
             to_remove = next->link;
             //Check if to_remove is of type A
             if(to_remove != NULL && to_remove->request_type == TYPE_A){
-                //If it is, it's been inserted correctly, now remove both.
-                //append to the removed list
-                list->removed_num = to_remove->alarm_number;
-                removed_list *rem = (removed_list *) malloc(sizeof(removed_list));
-                rem->next = NULL;
-                list->next = rem;
-                list = list->next;
+                //Before removing, mark thread as removed
+                find_in_list(to_remove->alarm_number);
+
                 //Remove both the cancellation requests as well as alarm itself
                 *last = to_remove->link;
                 free(to_remove);
@@ -143,23 +148,6 @@ void alarm_delete(removed_list ** last_rem){
         next = next->link;
     }
 };
-
-int should_remove(int alarm_number, removed_list** list) {
-    removed_list * next = *list;
-
-    while(next != NULL){
-        if (alarm_number == next->removed_num){
-            *list = next->next;
-            free(next);
-            return 1;
-        }
-        list = &next->next;
-        next = next->next;
-    }
-    return 0;
-
-}
-
 
 /*
  * Insert alarm entry on list, in order.
@@ -243,15 +231,20 @@ int alarm_insert (alarm_t *alarm)
     }
 }
 
-
+/*
+ * The display thread
+ * arg gets cast into the thread_alarm struct containing information
+ * pertaining to the specific thread
+ *
+ */
 void * display_thread(void * arg) {
 
-    alarm_t * thread_alarm = (alarm_t *) arg;
+    thread_alarm * alarm = (thread_alarm *) arg;
 
     char msg[128];
-    strcpy(msg, thread_alarm->message);
-    int alarm_num = thread_alarm->alarm_number;
-    int interval = thread_alarm->seconds;
+    strcpy(msg, alarm->alarm->message);
+    int alarm_num = alarm->alarm->alarm_number;
+    int interval = alarm->alarm->seconds;
     int has_changed =0;
     time_t now;
     time_t display_interval = time(NULL);
@@ -264,7 +257,7 @@ void * display_thread(void * arg) {
         sem_post(&display_sem);
         now = time(NULL);
         //If alarm was removed, exit.
-        if(should_remove(alarm_num, &removed) == 1){
+        if(alarm->removed == 1){
             printf("Display thread exiting at time %d: %d Message(%d) %s\n",
                    (int) now, interval, alarm_num, msg);
             sem_wait(&display_sem);
@@ -275,28 +268,25 @@ void * display_thread(void * arg) {
             pthread_exit(NULL);
         }
 
-        if(thread_alarm->changed == 1){
+        if(alarm->alarm->changed == 1){
 
             printf("Alarm With Message Number (%d) Replaced at %d: %d Message(%d) %s\n",
-                   thread_alarm->alarm_number, (int) now, thread_alarm->seconds,thread_alarm->alarm_number, thread_alarm->message);
-            interval = thread_alarm->seconds;
+                   alarm->alarm->alarm_number, (int) now, alarm->alarm->seconds,alarm->alarm->alarm_number, alarm->alarm->message);
+            interval = alarm->alarm->seconds;
             display_interval = now + interval;
             has_changed = 1;
-            thread_alarm->changed = 0;
-            strcpy(msg, thread_alarm->message);
-        }
-
-        //Perform read
-        if(now >= display_interval){
+            alarm->alarm->changed = 0;
+            strcpy(msg, alarm->alarm->message);
+        } else if(now >= display_interval){
             if(has_changed == 1){
                 printf("Replacement Alarm With Message Number (%d) Displayed at %d: %d Message(%d) %s\n",
-                       thread_alarm->alarm_number, (int) now, thread_alarm->seconds,thread_alarm->alarm_number, thread_alarm->message);
+                       alarm->alarm->alarm_number, (int) now, alarm->alarm->seconds,alarm->alarm->alarm_number, alarm->alarm->message);
 
             } else {
                 printf("Alarm With Message Number (%d) Displayed at %d: %d Message(%d) %s\n",
-                       thread_alarm->alarm_number, (int) now, thread_alarm->seconds,thread_alarm->alarm_number, thread_alarm->message);
+                       alarm->alarm->alarm_number, (int) now, alarm->alarm->seconds,alarm->alarm->alarm_number, alarm->alarm->message);
             }
-            display_interval = now+ thread_alarm->seconds;
+            display_interval = now+ alarm->alarm->seconds;
         }
 
         sem_wait(&display_sem);
@@ -308,18 +298,43 @@ void * display_thread(void * arg) {
 
 }
 
-int create_display_threads(){
+/*
+ * Creates the list of display threads based on the last appended to the list.
+ *
+ */
+display_thread_list * create_display_threads(display_thread_list * last){
     append_list * old;
+    display_thread_list * new_list_node;
+    thread_alarm * new_thread_alarm;
     int counter = 0;
     while(list_to_append != NULL){
         pthread_t new_thread;
         old = list_to_append;
+        new_list_node = (display_thread_list *)malloc(sizeof(display_thread_list));
+        new_list_node->previous = last;
+        new_list_node->next = NULL;
+        //Initialize the new thread's data
+        new_thread_alarm = (thread_alarm *) malloc(sizeof(thread_alarm));
+        new_thread_alarm->alarm = old->alarm;
+        new_thread_alarm->removed = 0;
+        //Add the new thread data to a list struct
+        last->data = new_thread_alarm;
+        //Append the
+        last->next = new_list_node;
+        last = last->next;
+
         list_to_append = list_to_append->next;
-        pthread_create(&new_thread, NULL, display_thread, (void *) old->alarm);
+        pthread_create(&new_thread, NULL, display_thread, (void *) new_thread_alarm);
         free(old);
         counter++;
     }
-    return counter;
+    flockfile(stdout);
+    printf("Created a bunch of shit: %d\n", counter);
+    fflush(stdout);
+    funlockfile(stdout);
+
+    //Return the reference to the last element
+    return last;
 
 }
 
@@ -331,6 +346,7 @@ void *alarm_thread (void *arg)
     int status;
     removed = (removed_list *)malloc(sizeof(removed_list));
     thread_list = (display_thread_list *) malloc(sizeof(display_thread_list));
+    display_thread_list * last = thread_list;
 
     /*
      * Loop forever, processing commands. The alarm thread will
@@ -346,11 +362,11 @@ void *alarm_thread (void *arg)
 
         if(append_flag == 1) {
 
-            create_display_threads();
+            last = create_display_threads(thread_list);
             append_flag = 0;
 
         } else if (delete_flag == 1){
-            alarm_delete(&removed);
+            alarm_delete();
             delete_flag = 0;
         }
 

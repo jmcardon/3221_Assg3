@@ -26,7 +26,8 @@ with open("test_file.txt", "r") as f:
                  "Error: More Than One Request to Cancel Alarm Request With Message Number",
                  "Error: No Alarm Request With Message Number",
                  "Error: Incorrect format",
-                 "Bad command"]
+                 "Bad command",
+                 "Display thread exiting at time"]
     for l in lines:
         try:
             # Send input to process
@@ -52,6 +53,9 @@ with open("test_file.txt", "r") as f:
             time.sleep(random.random())
         except KeyboardInterrupt:
             break
+        except pexpect.EOF:
+            print "LOL"
+            continue
 
 program_log.close()
 
