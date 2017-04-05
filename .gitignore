@@ -1,0 +1,7 @@
+cmake-build-debug
+.idea
+*.out
+*.swp
+*.o
+*.pdf
+.~lock.*
