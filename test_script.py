@@ -36,7 +36,7 @@ with open("test_file.txt", "r") as f:
                 index = child.expect(responses, timeout=30)
                 # Output results
                 print "Line sent: " + l.replace("\n","")
-                print "Expected Response: " + responses[index]
+                print "Response: " + responses[index]
 
             #Do not flood messages.
             # time.sleep(random.random())

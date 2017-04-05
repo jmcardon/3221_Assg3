@@ -1,14 +1,7 @@
 /*
- * alarm_cond.c
+ * New_Alarm_Cond.c
  *
- * This is an enhancement to the alarm_mutex.c program, which
- * used only a mutex to synchronize access to the shared alarm
- * list. This version adds a condition variable. The alarm
- * thread waits on this condition variable, with a timeout that
- * corresponds to the earliest timer request. If the main thread
- * enters an earlier timeout, it signals the condition variable
- * so that the alarm thread will wake up and process the earlier
- * timeout first, requeueing the later request.
+ *
  */
 #include <pthread.h>
 #include <time.h>
@@ -48,6 +41,8 @@ typedef struct alarm_tag {
  * This structure is useful in the case of flooded alarm requests, so it will append all in a batch,
  * or simply one by one.
  *
+ * The reference to last allows us to append to the end of the list
+ *
  */
 typedef struct append_list{
     alarm_t *           alarm;
@@ -55,23 +50,27 @@ typedef struct append_list{
     struct append_list* last;
 } append_list;
 
-typedef struct removed_list {
-    int             removed_num;
-    struct removed_list *  next;
-} removed_list;
-
-typedef struct thread_specific_alarm {
+/*
+ * Structure to hold the display thread's alarm object and
+ * information regarding the alarm's removal (aka free() called on alarm).
+ *
+ */
+typedef struct display_thread_alarm {
     alarm_t *       alarm;
     int             removed;
 } thread_alarm;
 
+/*
+ * Linked list holding a reference to the current threads
+ * and their respective data structures.
+ *
+ */
 typedef struct thread_alarm_list {
     struct thread_alarm_list *   next;
     struct thread_alarm_list *   previous;
     thread_alarm *               data;
 } display_thread_list;
 
-removed_list * removed = NULL;
 
 int alarm_thread_flag = 0;
 int reader_flag = 0;
@@ -80,7 +79,7 @@ int reader_flag = 0;
 alarm_t *alarm_list = NULL;
 append_list *list_to_append = NULL;
 
-sem_t alarm_semaphore;
+sem_t main_semaphore;
 sem_t display_sem;
 
 int append_flag = 0;
@@ -106,7 +105,7 @@ void find_in_list(int alarm_num){
 
             //If we have freed the first element, make sure to move the index over to the next one
             if(thread_list == list){
-             thread_list = thread_list->next;
+                thread_list = thread_list->next;
             }
             //Free the latest in the list
             free(list);
@@ -261,7 +260,7 @@ void * display_thread(void * arg) {
         sem_wait(&display_sem);
         reader_flag++;
         if(reader_flag == 1)
-            sem_wait(&alarm_semaphore);
+            sem_wait(&main_semaphore);
         sem_post(&display_sem);
         now = time(NULL);
         //If alarm was removed, exit.
@@ -277,7 +276,7 @@ void * display_thread(void * arg) {
             sem_wait(&display_sem);
             reader_flag--;
             if(reader_flag ==0)
-                sem_post(&alarm_semaphore);
+                sem_post(&main_semaphore);
             sem_post(&display_sem);
             pthread_exit(NULL);
 
@@ -310,7 +309,7 @@ void * display_thread(void * arg) {
         sem_wait(&display_sem);
         reader_flag--;
         if(reader_flag ==0)
-            sem_post(&alarm_semaphore);
+            sem_post(&main_semaphore);
         sem_post(&display_sem);
     }
 
@@ -336,10 +335,18 @@ display_thread_list * create_display_threads(display_thread_list * last){
 
         old = list_to_append;
         new_list_node = (display_thread_list *)malloc(sizeof(display_thread_list));
+        if (new_list_node == NULL) {
+            printf("Out of memory!\n");
+            exit(1);
+        }
         new_list_node->previous = last;
         new_list_node->next = NULL;
         //Initialize the new thread's data
         new_thread_alarm = (thread_alarm *) malloc(sizeof(thread_alarm));
+        if (new_thread_alarm == NULL) {
+            printf("Out of memory!\n");
+            exit(1);
+        }
         new_thread_alarm->alarm = old->alarm;
         new_thread_alarm->removed = 0;
         //Add the new thread data to a list struct
@@ -364,9 +371,9 @@ display_thread_list * create_display_threads(display_thread_list * last){
  */
 void *alarm_thread (void *arg)
 {
-    int status;
-    removed = (removed_list *)malloc(sizeof(removed_list));
     thread_list = (display_thread_list *) malloc(sizeof(display_thread_list));
+    if (thread_list == NULL)
+        errno_abort("Out of memory\n");
     display_thread_list * last = thread_list;
 
     /*
@@ -380,20 +387,22 @@ void *alarm_thread (void *arg)
 
         //Busy wait while the flag is 0
         while(alarm_thread_flag == 0);
-        sem_wait(&alarm_semaphore);
+        sem_wait(&main_semaphore);
 
         if(append_flag == 1) {
 
             last = create_display_threads(last);
             append_flag = 0;
 
-        } else if (delete_flag == 1){
+        }
+
+        if (delete_flag == 1){
             alarm_delete();
             delete_flag = 0;
         }
 
         alarm_thread_flag = 0;
-        sem_post(&alarm_semaphore);
+        sem_post(&main_semaphore);
 
     }
 }
@@ -405,12 +414,13 @@ int main (int argc, char *argv[])
     char msg[10];
     char cancellation[10];
     int err_num, message_num;
+
     time_t now;
     alarm_t *alarm;
     pthread_t thread;
     append_list * to_append;
 
-    if(sem_init(&alarm_semaphore,0,1) < 0){
+    if(sem_init(&main_semaphore,0,1) < 0){
         printf("Error creating semaphore!");
         exit(1);
     }
@@ -420,14 +430,12 @@ int main (int argc, char *argv[])
         exit(1);
     }
 
-
-
+    //Create the alarm thread
     status = pthread_create (
             &thread, NULL, alarm_thread, NULL);
     if (status != 0)
         err_abort (status, "Create alarm thread");
     while (1) {
-
         printf ("Alarm> ");
         if (fgets (line, sizeof (line), stdin) == NULL) exit (0);
         if (strlen (line) <= 1) continue;
@@ -446,7 +454,7 @@ int main (int argc, char *argv[])
                 alarm->time = now + alarm->seconds;
                 alarm->changed = 0;
                 //Main thread always counts as a writer, never a reader.
-                status = sem_wait(&alarm_semaphore);
+                status = sem_wait(&main_semaphore);
                 if (status != 0)
                     err_abort (status, "Lock mutex");
 
@@ -487,7 +495,7 @@ int main (int argc, char *argv[])
                 }
                 alarm_thread_flag = 1;
 
-                status = sem_post(&alarm_semaphore);
+                status = sem_post(&main_semaphore);
                 if (status != 0)
                     err_abort (status, "Unlock mutex");
 
@@ -504,7 +512,7 @@ int main (int argc, char *argv[])
                 alarm->alarm_number = message_num;
                 alarm->request_type = TYPE_B;
 
-                status = sem_wait(&alarm_semaphore);
+                status = sem_wait(&main_semaphore);
                 if (status != 0)
                     err_abort (status, "Lock mutex");
 
@@ -531,7 +539,7 @@ int main (int argc, char *argv[])
                         err_abort(1, "Alarm added an incorrect type");
                 }
 
-                status = sem_post(&alarm_semaphore);
+                status = sem_post(&main_semaphore);
                 if (status != 0)
                     err_abort (status, "Unlock mutex");
 
