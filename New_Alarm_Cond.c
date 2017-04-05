@@ -54,6 +54,18 @@ typedef struct removed_list {
     struct removed_list *  next;
 } removed_list;
 
+typedef struct thread_specific_alarm {
+    alarm_t         alarm;
+    int             alarm_num;
+    int             removed;
+} thread_alarm;
+
+typedef struct thread_alarm_list {
+    thread_alarm * next;
+    thread_alarm * previous;
+    thread_alarm * data;
+} display_thread_list;
+
 removed_list * removed = NULL;
 
 int alarm_thread_flag = 0;
@@ -68,6 +80,22 @@ sem_t display_sem;
 
 int append_flag = 0;
 int delete_flag = 0;
+
+display_thread_list * thread_list = NULL;
+
+/*
+ * Finds a thread in the list to mark as removed.
+ *
+ */
+void find_in_list(int alarm_num){
+    display_thread_list * list = thread_list;
+    while(list != NULL){
+        if(list->data->alarm_num == alarm_num){
+            //Mark as removed;
+            list->data->removed = 1;
+        }
+    }
+}
 
 
 
@@ -163,6 +191,7 @@ int alarm_insert (alarm_t *alarm)
                         next->seconds = alarm->seconds;
                         next->time = alarm->time;
                         strcpy(next->message, alarm->message);
+                        next->changed = 1;
                         //Free the previous alarm
                         free(alarm);
                         //Replace its pointer in memory.
@@ -223,6 +252,7 @@ void * display_thread(void * arg) {
     strcpy(msg, thread_alarm->message);
     int alarm_num = thread_alarm->alarm_number;
     int interval = thread_alarm->seconds;
+    int has_changed =0;
     time_t now;
     time_t display_interval = time(NULL);
 
@@ -245,19 +275,20 @@ void * display_thread(void * arg) {
             pthread_exit(NULL);
         }
 
-        if(strcmp(msg, thread_alarm->message) != 0 || thread_alarm->seconds != interval){
+        if(thread_alarm->changed == 1){
 
             printf("Alarm With Message Number (%d) Replaced at %d: %d Message(%d) %s\n",
                    thread_alarm->alarm_number, (int) now, thread_alarm->seconds,thread_alarm->alarm_number, thread_alarm->message);
             interval = thread_alarm->seconds;
-            thread_alarm->changed = 1;
             display_interval = now + interval;
+            has_changed = 1;
+            thread_alarm->changed = 0;
             strcpy(msg, thread_alarm->message);
         }
 
         //Perform read
         if(now >= display_interval){
-            if(thread_alarm->changed == 1){
+            if(has_changed == 1){
                 printf("Replacement Alarm With Message Number (%d) Displayed at %d: %d Message(%d) %s\n",
                        thread_alarm->alarm_number, (int) now, thread_alarm->seconds,thread_alarm->alarm_number, thread_alarm->message);
 
@@ -299,6 +330,7 @@ void *alarm_thread (void *arg)
 {
     int status;
     removed = (removed_list *)malloc(sizeof(removed_list));
+    thread_list = (display_thread_list *) malloc(sizeof(display_thread_list));
 
     /*
      * Loop forever, processing commands. The alarm thread will

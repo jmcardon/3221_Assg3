@@ -18,7 +18,7 @@ if not os.path.isfile("program_log.txt"):
 program_log = open("program_log.txt", "w")
 
 child.logfile_read = program_log
-with open("testfile.txt", "r") as f:
+with open("test_file.txt", "r") as f:
     lines = f.readlines()
     responses = ["First Alarm Request With Message Number",
                  "Replacement Alarm Request With Message Number",
