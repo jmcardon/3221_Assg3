@@ -165,9 +165,7 @@ void alarm_delete(){
  * Note: It will always insert a type B request in front of a type A, as is requred by
  * alarm_delete.
  */
-int alarm_insert (alarm_t *alarm)
-{
-    int status;
+int alarm_insert (alarm_t *alarm) {
     alarm_t **last, *next;
 
     /*
@@ -282,6 +280,8 @@ void * display_thread(void * arg) {
             if(reader_flag ==0)
                 sem_post(&main_semaphore);
             sem_post(&display_sem);
+            //Free the thread_alarm struct used in this thread
+            free(alarm);
             pthread_exit(NULL);
 
 
@@ -322,9 +322,14 @@ void * display_thread(void * arg) {
 /*
  * Creates the list of display threads based on the last appended to the list.
  * It functions as a queue, creating threads in the order which they were added to the list.
+ * We are assuming the `last` element is will not be passed as null, otherwise this could result in a
+ * segfault.
  *
  */
 display_thread_list * create_display_threads(display_thread_list * last){
+    if(last == NULL)
+        errno_abort("Last should not be null!");
+
     //Reference to old element
     append_list * old;
     //New list node for the display thread list
@@ -373,8 +378,7 @@ display_thread_list * create_display_threads(display_thread_list * last){
 /*
  * The alarm thread's start routine.
  */
-void *alarm_thread (void *arg)
-{
+void *alarm_thread (void *arg) {
     thread_list = (display_thread_list *) malloc(sizeof(display_thread_list));
     if (thread_list == NULL)
         errno_abort("Out of memory\n");
@@ -395,6 +399,7 @@ void *alarm_thread (void *arg)
 
         if(append_flag == 1) {
 
+            //Create display threads
             last = create_display_threads(last);
             append_flag = 0;
 
@@ -411,8 +416,7 @@ void *alarm_thread (void *arg)
     }
 }
 
-int main (int argc, char *argv[])
-{
+int main (int argc, char *argv[]) {
     int status;
     char line[160]; //Messages with higher allocated size
     char msg[10];
