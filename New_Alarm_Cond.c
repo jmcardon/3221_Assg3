@@ -1,6 +1,12 @@
 /*
- * New_Alarm_Cond.c
+ * EECS 3221 Assignment 3
  *
+ * New_Alarm_Cond.c
+ * By:
+ * Jose Cardona
+ * Derek Li
+ * Minh Nguyen
+ * Harpreet Kaur Saini
  *
  */
 #include <pthread.h>
@@ -31,7 +37,6 @@ typedef struct alarm_tag {
     int                 seconds;
     int                 alarm_number;
     int                 request_type;
-    time_t              time;   /* seconds from EPOCH */
     char                message[128];
     int                 changed;
 } alarm_t;
@@ -183,7 +188,6 @@ int alarm_insert (alarm_t *alarm)
                     if(alarm->request_type == TYPE_A){
                         //Copy the message and the new time
                         next->seconds = alarm->seconds;
-                        next->time = alarm->time;
                         strcpy(next->message, alarm->message);
                         next->changed = 1;
                         //Free the previous alarm
@@ -451,7 +455,6 @@ int main (int argc, char *argv[])
                 now = time(NULL);
                 alarm->link = NULL;
                 alarm->request_type = TYPE_A;
-                alarm->time = now + alarm->seconds;
                 alarm->changed = 0;
                 //Main thread always counts as a writer, never a reader.
                 status = sem_wait(&main_semaphore);
