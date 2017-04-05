@@ -1,44 +1,44 @@
-10 Message(1) hello
+2 Message(1) hello
 5 Message(2) goodbye
 2 Message(3) ayylmao
-1 Message(4) kek
-1 Message(5) kek
-1 Message(6) kek
-1 Message(7) kek
-1 Message(8) kek
-1 Message(9) kek
-1 Message(10) kek
-1 Message(11) kek
-1 Message(14) kek
-1 Message(24) kek
-1 Message(34) kek
-1 Message(44) kek
-1 Message(54) kek
-1 Message(64) kek
-1 Message(10) kek
-1 Message(84) kek
-asdasdasdasdasd 
-asdasdasdasdasd 
+1 Message(4) I love operating systems
+1 Message(5) John wick 2 was a pretty bad movie
+1 Message(6) Like actually he just owned people for like 2 hours
+1 Message(7) Pretty much 1v100 not even fair
+1 Message(8) Like how is that even remotely realistic
+1 Message(9) Yeah, that's the thing, it's NOT
+1 Message(10) You know what movie was good though?
+1 Message(11) Arrival. Great movie
+1 Message(14) Didn't expect the ending at all
+1 Message(24) Logan was pretty awesome too
+1 Message(34) I hope the star wars movie this year
+1 Message(44) is also up to par. I'm a big fan
+1 Message(54) Or the planet of the apes movie
+1 Message(64) I hope they don't ruin that either
+1 Message(10) So anyway, how was your day mr TA?
+1 Message(84) Good I hope
 asdasdasdasdasd 
 asdasdasdasdasd
 asdasdasdasdasd
-Cancel: Message(1)
-Cancel: Message(2)
-Cancel: Message(3)
-Cancel: Message(4)
-Cancel: Message(5)
-Cancel: Message(6)
-Cancel: Message(7)
+asdasdasdasdasd
 Cancel: Message(8)
 Cancel: Message(9)
+Cancel: Message(34)
+Cancel: Message(34)
+Cancel: Message(44)
+Cancel: Message(4)
+Cancel: Message(7)
+Cancel: Message(54)
+Cancel: Message(64)
+Cancel: Message(84)
 Cancel: Message(10)
 Cancel: Message(11)
 Cancel: Message(14)
 Cancel: Message(24)
-Cancel: Message(34)
-Cancel: Message(44)
-Cancel: Message(54)
-Cancel: Message(64)
+Cancel: Message(5)
+Cancel: Message(6)
+Cancel: Message(1)
+Cancel: Message(2)
 Cancel: Message(10)
-Cancel: Message(84)
+Cancel: Message(3)
 asdasdasdasdasd

@@ -43,6 +43,12 @@ typedef struct alarm_tag {
     int                 changed;
 } alarm_t;
 
+/*
+ * The append_list structure contains the alarm to move to a new thread and append.
+ * This structure is useful in the case of flooded alarm requests, so it will append all in a batch,
+ * or simply one by one.
+ *
+ */
 typedef struct append_list{
     alarm_t *           alarm;
     struct append_list* next;
@@ -88,22 +94,22 @@ display_thread_list * thread_list = NULL;
  */
 void find_in_list(int alarm_num){
     display_thread_list * list = thread_list;
-    display_thread_list * old;
     while(list != NULL){
         if(list->data->alarm->alarm_number == alarm_num){
             //Mark as removed;
             list->data->removed = 1;
             //Remove from list, the thread will clean itself up
             if(list->next != NULL)
-                list->next->previous;
+                list->next->previous = list->previous;
             if(list->previous != NULL)
                 list->previous->next = list->next;
 
+            //If we have freed the first element, make sure to move the index over to the next one
             if(thread_list == list){
-             *(&thread_list) = list->next;
+             thread_list = thread_list->next;
             }
-            old = list;
-            free(old);
+            //Free the latest in the list
+            free(list);
             return;
         }
         list = list->next;
@@ -115,6 +121,7 @@ void find_in_list(int alarm_num){
 /*
  * Function to execute a cancel request.
  * In the case of multiple type B request, it will remove all type B requests inserted in one go.
+ * It achieves this by setting the flag in find_in_list
  * Note: last_rem should be null
  *
  */
@@ -250,6 +257,7 @@ void * display_thread(void * arg) {
     time_t display_interval = time(NULL);
 
     while(1){
+        //Readers-first synchronization
         sem_wait(&display_sem);
         reader_flag++;
         if(reader_flag == 1)
@@ -258,18 +266,26 @@ void * display_thread(void * arg) {
         now = time(NULL);
         //If alarm was removed, exit.
         if(alarm->removed == 1){
+            flockfile(stdout);
             printf("Display thread exiting at time %d: %d Message(%d) %s\n",
                    (int) now, interval, alarm_num, msg);
+            fflush(stdout);
+            funlockfile(stdout);
+
+            //Exit safely and not abruptly
+            //If this is the last thread to exit, make sure it unlocks the semaphore as well
             sem_wait(&display_sem);
             reader_flag--;
             if(reader_flag ==0)
                 sem_post(&alarm_semaphore);
             sem_post(&display_sem);
             pthread_exit(NULL);
+
+
         }
 
+        //If the alarm has been altered, display the message and then set the altered flag.
         if(alarm->alarm->changed == 1){
-
             printf("Alarm With Message Number (%d) Replaced at %d: %d Message(%d) %s\n",
                    alarm->alarm->alarm_number, (int) now, alarm->alarm->seconds,alarm->alarm->alarm_number, alarm->alarm->message);
             interval = alarm->alarm->seconds;
@@ -278,6 +294,7 @@ void * display_thread(void * arg) {
             alarm->alarm->changed = 0;
             strcpy(msg, alarm->alarm->message);
         } else if(now >= display_interval){
+            //Check if the interval has been satisfied and
             if(has_changed == 1){
                 printf("Replacement Alarm With Message Number (%d) Displayed at %d: %d Message(%d) %s\n",
                        alarm->alarm->alarm_number, (int) now, alarm->alarm->seconds,alarm->alarm->alarm_number, alarm->alarm->message);
@@ -289,6 +306,7 @@ void * display_thread(void * arg) {
             display_interval = now+ alarm->alarm->seconds;
         }
 
+        //Readers-first synchro
         sem_wait(&display_sem);
         reader_flag--;
         if(reader_flag ==0)
@@ -300,15 +318,22 @@ void * display_thread(void * arg) {
 
 /*
  * Creates the list of display threads based on the last appended to the list.
+ * It functions as a queue, creating threads in the order which they were added to the list.
  *
  */
 display_thread_list * create_display_threads(display_thread_list * last){
+    //Reference to old element
     append_list * old;
+    //New list node for the display thread list
     display_thread_list * new_list_node;
+    //New thread_alarm
     thread_alarm * new_thread_alarm;
+    //create a new thread. We don't care about the reference so we can discard it after the loop
+    pthread_t new_thread;
     int counter = 0;
     while(list_to_append != NULL){
-        pthread_t new_thread;
+
+
         old = list_to_append;
         new_list_node = (display_thread_list *)malloc(sizeof(display_thread_list));
         new_list_node->previous = last;
@@ -328,10 +353,6 @@ display_thread_list * create_display_threads(display_thread_list * last){
         free(old);
         counter++;
     }
-    flockfile(stdout);
-    printf("Created a bunch of shit: %d\n", counter);
-    fflush(stdout);
-    funlockfile(stdout);
 
     //Return the reference to the last element
     return last;
@@ -350,9 +371,10 @@ void *alarm_thread (void *arg)
 
     /*
      * Loop forever, processing commands. The alarm thread will
-     * be disintegrated when the process exits. Lock the mutex
-     * at the start -- it will be unlocked during condition
-     * waits, so the main thread can insert alarms.
+     * be disintegrated when the process exits.
+     * The default alarm_thread_flag will be 0, so the thread will busy wait
+     * until there are tasks for it
+     *
      */
     while (1) {
 
@@ -362,7 +384,7 @@ void *alarm_thread (void *arg)
 
         if(append_flag == 1) {
 
-            last = create_display_threads(thread_list);
+            last = create_display_threads(last);
             append_flag = 0;
 
         } else if (delete_flag == 1){
@@ -434,13 +456,16 @@ int main (int argc, char *argv[])
                     case FIRST_ALARM:
                         printf("First Alarm Request With Message Number (%d) Received at %d: %d Message(%d) %s\n",
                                alarm->alarm_number, (int) now, alarm->seconds, alarm->alarm_number, alarm->message);
+                        //Add the element to the append list
                         to_append = (append_list *) malloc(sizeof(append_list));
                         to_append->next = NULL;
                         to_append->alarm = alarm;
                         to_append->last = NULL;
+                        //If the list is null, make the list reference the element
                         if(list_to_append == NULL) {
                             list_to_append = to_append;
                         } else {
+                            //Otherwise, append in the next available
                             if(list_to_append->next == NULL){
                                 list_to_append->next = to_append;
                                 list_to_append->last = to_append;
@@ -449,10 +474,8 @@ int main (int argc, char *argv[])
                                 list_to_append->last = to_append;
                             }
                         }
+                        //Set the append flag, telling the alarm_thread we want to create threads
                         append_flag = 1;
-
-
-
                         break;
                     case REPLACEMENT:
                         printf("Replacement Alarm Request With Message Number (%d) Received at %d: %d Message(%d) %s\n",
@@ -499,7 +522,9 @@ int main (int argc, char *argv[])
                     case CANCEL_REQ:
                         printf("Cancel Alarm Request With Message Number (Message_Number) Received at %d: Cancel: Message(%d)\n",
                                (int) now, alarm->alarm_number);
+                        //Set the alarm thread flag
                         alarm_thread_flag = 1;
+                        //Set the delete flag, telling the alarm_thread we want to delete items.
                         delete_flag = 1;
                         break;
                     default:
